@@ -1,0 +1,6 @@
+[submodule "submodules/ToMBench"]
+	path = submodules/ToMBench
+	url = https://github.com/zhchen18/ToMBench
+[submodule "submodules/wanda"]
+	path = submodules/wanda
+	url = https://github.com/locuslab/wanda
