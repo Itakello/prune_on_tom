@@ -1,3 +1,6 @@
 [submodule "submodules/ToMBench"]
 	path = submodules/ToMBench
 	url = https://github.com/zhchen18/ToMBench
+[submodule "submodules/SparseLLM"]
+	path = submodules/SparseLLM
+	url = https://github.com/BaiTheBest/SparseLLM.git
