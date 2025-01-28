@@ -52,6 +52,17 @@
                 "--cache_dir",
                 "D:\\tmp\\hf_cache\\hub"
             ]
+        },
+        {
+            "name": "Main",
+            "type": "python",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--eval_num",
+                "5"
+            ]
         }
     ]
 }
