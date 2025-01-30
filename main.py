@@ -18,7 +18,7 @@ SHORT_NAMES = {
     "Unexpected Outcome Test.jsonl": "UOT",
     "Persuasion Story Task.jsonl": "PST",
     "Strange Story Task.jsonl": "SST",
-    "Scalar Implicature Task.jsonl": "SIT",
+    "Scalar Implicature Test.jsonl": "SIT",
 }
 
 
@@ -99,6 +99,7 @@ def evaluate_model_on_tom(
             **inputs,
             max_length=1024,
             do_sample=False,
+            temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
         )
         # Remove the prompt portion
