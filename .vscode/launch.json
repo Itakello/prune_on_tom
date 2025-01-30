@@ -60,9 +60,14 @@
             "program": "main.py",
             "console": "integratedTerminal",
             "args": [
-                "--eval_num",
-                "5"
-            ]
+                "--seed",
+                "43",
+                "--train_num",
+                "64",
+                "--test_num",
+                "20"
+            ],
+            "justMyCode": false
         }
     ]
 }
