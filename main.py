@@ -1,31 +1,15 @@
 import argparse
 import csv
 import os
-import random
 
+import numpy as np
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from submodules.SparseLLM.datautils import get_tokenizer, get_tom
+from submodules.SparseLLM.datautils import SYSTEM_PROMPT, _build_user_message, get_tom
 from submodules.SparseLLM.model_utils import llama_sparsellm
 
-############################################################################
-# Define the 8 subtask files from ToMBench
-############################################################################
-
-TOMBENCH_SUBTASKS = [
-    "Ambiguous Story Task.jsonl",
-    "False Belief Task.jsonl",
-    "Hinting Task Test.jsonl",
-    "Faux-pas Recognition Test.jsonl",
-    "Unexpected Outcome Test.jsonl",
-    "Persuasion Story Task.jsonl",
-    "Strange Story Task.jsonl",
-    "Scalar Implicature Task.jsonl",
-]
-
-# For CSV column naming
 SHORT_NAMES = {
     "Ambiguous Story Task.jsonl": "AST",
     "False Belief Task.jsonl": "FBT",
@@ -37,9 +21,15 @@ SHORT_NAMES = {
     "Scalar Implicature Task.jsonl": "SIT",
 }
 
-############################################################################
-# Simple evaluation logic for test records
-############################################################################
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+CSV_NAME = "output.csv"
+
+
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.random.manual_seed(seed)
 
 
 def extract_answer(text: str) -> str:
@@ -47,13 +37,13 @@ def extract_answer(text: str) -> str:
     Parse model output to find predicted A/B/C/D from patterns like [[A]] or the last letter we see.
     """
     # Quick bracket check
-    if "[[A]]" in text:
+    if "[A]" in text:
         return "A"
-    elif "[[B]]" in text:
+    elif "[B]" in text:
         return "B"
-    elif "[[C]]" in text:
+    elif "[C]" in text:
         return "C"
-    elif "[[D]]" in text:
+    elif "[D]" in text:
         return "D"
     # fallback search from end
     for i in range(len(text) - 1, -1, -1):
@@ -63,62 +53,17 @@ def extract_answer(text: str) -> str:
 
 
 def format_prompt_for_test(record, shuffle_choices=True):
-    """
-    Build a [SYSTEM] + [USER] style prompt for the test record,
-    but do *not* reveal the correct answer. We'll randomize the letter ordering for multiple tries.
-    """
-    system_prompt = """Below is a multiple-choice question with a story and several answer options. Based on the content of the story and the given question, please infer the most likely answer and output the answer index.
-    Note:
-    (1) Please only output the most likely answer index in the format: [[Answer Index]];
-    (2) You must choose one of A, B, C, D even if the story doesn't have enough info;
-    (3) Output only the answer index, nothing else.
-    """
-
-    # We'll do a plain prefix: "<s>[SYSTEM]\n..."
-    # Then [USER] portion includes the story, question, and the candidate answers in random order if desired.
-    # Distinguish 2-choice vs 4-choice
-    optC = record.get("OPTION-C", None)
-    if optC is not None:
-        # 4-choice
-        A = record["OPTION-A"].replace("A. ", "")
-        B = record["OPTION-B"].replace("B. ", "")
-        C = record["OPTION-C"].replace("C. ", "")
-        D = record["OPTION-D"].replace("D. ", "")
-        all_choices = [("A", A), ("B", B), ("C", C), ("D", D)]
-    else:
-        # 2-choice
-        A = record["OPTION-A"].replace("A. ", "")
-        B = record["OPTION-B"].replace("B. ", "")
-        all_choices = [("A", A), ("B", B)]
-
-    if shuffle_choices:
-        random.shuffle(all_choices)
-
-    user_part = (
-        f"[Story]\n{record['STORY']}\n\n"
-        f"[Question]\n{record['QUESTION']}\n\n"
-        f"[Candidate Answers]\n"
-    )
-    letter_map = {}
-    for i, (orig_letter, textval) in enumerate(all_choices):
-        new_letter = chr(ord("A") + i)  # 'A' or 'B' or ...
-        user_part += f"{new_letter}. {textval}\n"
-        # We'll remember how new_letter maps to the original "A/B/C/D"
-        letter_map[new_letter] = orig_letter
-
-    system_block = "[SYSTEM]\n" + system_prompt
-    user_block = "[USER]\n" + user_part
-    # Final text
-    return system_block + "\n" + user_block, letter_map
+    system_msg = SYSTEM_PROMPT
+    user_msg, letter_map = _build_user_message(record, shuffle=shuffle_choices)
+    return system_msg, user_msg, letter_map
 
 
 def evaluate_model_on_tom(
     model, tokenizer, subtask_records, subtask_name, device="cuda"
 ):
     """
-    Evaluate a *finetuned or pruned* model on a list of leftover test records (like the output from get_tom).
-    We do 'try_times' random shuffles for each record, then majority-vote the predicted letter.
-    Return accuracy float in [0..1].
+    Evaluate a *finetuned or pruned* model on a list of leftover test records.
+    Uses separate system and user messages for proper chat formatting.
     """
     if len(subtask_records) == 0:
         return 0.0
@@ -130,10 +75,25 @@ def evaluate_model_on_tom(
     ):
         gold = rec.get("ANSWER\nANSWER", "A") or "A"
 
-        prompt_text, letter_map = format_prompt_for_test(rec, shuffle_choices=True)
+        system_msg, user_msg, letter_map = format_prompt_for_test(
+            rec, shuffle_choices=True
+        )
+
+        # Format as chat messages using the tokenizer's template
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ]
+
+        # Convert to model input format using the tokenizer's chat template
+        chat_text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+
         # Convert to tokens
-        inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
+        inputs = tokenizer(chat_text, return_tensors="pt").to(device)
         model = model.to(device)
+
         # Generate
         out = model.generate(
             **inputs,
@@ -161,14 +121,15 @@ def main() -> None:
         default="meta-llama/Llama-3.2-3b-Instruct",
         help="Base model name/path.",
     )
-    parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument(
         "--train_num", type=int, default=32, help="Calibration set size per subtask."
     )
     parser.add_argument(
-        "--test_num", type=int, default=5, help="Test set size per subtask."
+        "--test_num",
+        type=int,
+        default=5,
+        help="Test set size per subtask, if negative use all.",
     )
-    parser.add_argument("--output_csv", type=str, default="results.csv")
     parser.add_argument(
         "--sparsity_ratios",
         nargs="+",
@@ -179,25 +140,25 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    set_seed(args.seed)
+
     torch.set_default_dtype(torch.float32)
     torch.cuda.empty_cache()
 
-    table_header = ["model_name", "sparsity"] + [
-        SHORT_NAMES[s] for s in TOMBENCH_SUBTASKS
-    ]
+    table_header = ["model_name", "sparsity"] + list(SHORT_NAMES.values())
     results_rows = []
 
     print("\n=== Evaluating RAW model ===")
     raw_model = AutoModelForCausalLM.from_pretrained(
         args.model, torch_dtype=torch.float16
-    ).to(args.device)
+    ).to(DEVICE)
     raw_model.eval()
-    tokenizer = get_tokenizer(args.model)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id or 0
 
     subtask_accs = []
-    for eval_task in TOMBENCH_SUBTASKS:
+    for eval_task in SHORT_NAMES.keys():
         # purely use leftover test data
         _, test_recs = get_tom(
             tokenizer,
@@ -211,7 +172,7 @@ def main() -> None:
             tokenizer,
             test_recs,
             eval_task,
-            device=args.device,
+            device=DEVICE,
         )
         subtask_accs.append(acc)
 
@@ -220,16 +181,16 @@ def main() -> None:
 
     print("\n=== Evaluating PRUNED models ===")
 
-    for i, subtask_file in enumerate(TOMBENCH_SUBTASKS):
+    for i, subtask_file in enumerate(SHORT_NAMES.keys()):
         for ratio in args.sparsity_ratios:
             # 1) Load fresh model
             print(f"\n=== Pruning on subtask '{subtask_file}' at {ratio}% sparsity ===")
             base_model = AutoModelForCausalLM.from_pretrained(
                 args.model, torch_dtype=torch.float16
-            ).to(args.device)
+            ).to(DEVICE)
 
             # 2) Prepare calibration set & test set for *this* subtask
-            tokenizer = get_tokenizer(args.model)
+            tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=False)
             if tokenizer.pad_token_id is None:
                 tokenizer.pad_token_id = tokenizer.eos_token_id or 0
 
@@ -251,14 +212,14 @@ def main() -> None:
 
             # Actually prune
             llama_sparsellm(
-                base_model, trainloader, torch.device(args.device), ratio / 100.0
+                base_model, trainloader, torch.device(DEVICE), ratio / 100.0
             )
 
             base_model.eval()
 
             # Evaluate on all 8 subtasks
             subtask_accs = []
-            for eval_task in TOMBENCH_SUBTASKS:
+            for eval_task in SHORT_NAMES.keys():
                 # get test set from that subtask
                 _, test_recs = get_tom(
                     tokenizer,
@@ -273,7 +234,7 @@ def main() -> None:
                     tokenizer,
                     test_recs,
                     eval_task,
-                    device=args.device,
+                    device=DEVICE,
                 )
                 subtask_accs.append(acc)
 
@@ -289,13 +250,13 @@ def main() -> None:
             torch.cuda.empty_cache()
 
     # Write CSV
-    with open(args.output_csv, "w", newline="", encoding="utf-8") as fout:
+    with open(CSV_NAME, "w", newline="", encoding="utf-8") as fout:
         writer = csv.writer(fout)
         writer.writerow(table_header)
         for row in results_rows:
             writer.writerow(row)
 
-    print(f"\nAll done! Results saved to '{args.output_csv}'.")
+    print(f"\nAll done! Results saved to '{CSV_NAME}'.")
     print("Rows:", len(results_rows))
     print("Columns:", len(table_header))
 
