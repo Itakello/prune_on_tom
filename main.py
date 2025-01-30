@@ -8,9 +8,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 
 from submodules.SparseLLM.datautils import get_tokenizer, get_tom
-
-# Use the pruning/eval routines from the existing SparseLLM code
-from submodules.SparseLLM.model_utils import get_llama, llama_sparsellm
+from submodules.SparseLLM.model_utils import llama_sparsellm
 
 ############################################################################
 # Define the 8 subtask files from ToMBench
@@ -64,13 +62,6 @@ def extract_answer(text: str) -> str:
     return "A"  # default
 
 
-def most_common(lst):
-    counts = {}
-    for x in lst:
-        counts[x] = counts.get(x, 0) + 1
-    return max(counts, key=counts.get)
-
-
 def format_prompt_for_test(record, shuffle_choices=True):
     """
     Build a [SYSTEM] + [USER] style prompt for the test record,
@@ -122,7 +113,7 @@ def format_prompt_for_test(record, shuffle_choices=True):
 
 
 def evaluate_model_on_tom(
-    model, tokenizer, subtask_records, subtask_name, try_times=3, device="cuda"
+    model, tokenizer, subtask_records, subtask_name, device="cuda"
 ):
     """
     Evaluate a *finetuned or pruned* model on a list of leftover test records (like the output from get_tom).
@@ -139,37 +130,30 @@ def evaluate_model_on_tom(
     ):
         gold = rec.get("ANSWER\nANSWER", "A") or "A"
 
-        these_preds = []
-        for _ in range(try_times):
-            prompt_text, letter_map = format_prompt_for_test(rec, shuffle_choices=True)
-            # Convert to tokens
-            inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
-            model = model.to(device)
-            # Generate
-            out = model.generate(
-                **inputs,
-                max_length=1024,
-                do_sample=True,
-                top_k=1,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            # Remove the prompt portion
-            gen_part = out[0][inputs["input_ids"].shape[1] :]
-            gen_text = tokenizer.decode(gen_part, skip_special_tokens=True)
+        prompt_text, letter_map = format_prompt_for_test(rec, shuffle_choices=True)
+        # Convert to tokens
+        inputs = tokenizer(prompt_text, return_tensors="pt").to(device)
+        model = model.to(device)
+        # Generate
+        out = model.generate(
+            **inputs,
+            max_length=1024,
+            do_sample=False,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+        # Remove the prompt portion
+        gen_part = out[0][inputs["input_ids"].shape[1] :]
+        gen_text = tokenizer.decode(gen_part, skip_special_tokens=True)
+        raw_letter = extract_answer(gen_text)
+        mapped_letter = letter_map.get(raw_letter, "A")
 
-            raw_letter = extract_answer(gen_text)
-            mapped_letter = letter_map.get(raw_letter, "A")
-            these_preds.append(mapped_letter)
-
-        # majority vote
-        maj = most_common(these_preds)
-        if maj == gold:
+        if mapped_letter == gold:
             correct += 1
 
     return correct / len(subtask_records)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
@@ -184,12 +168,6 @@ def main():
     parser.add_argument(
         "--test_num", type=int, default=5, help="Test set size per subtask."
     )
-    parser.add_argument(
-        "--try_times",
-        type=int,
-        default=3,
-        help="How many random shuffles per test sample.",
-    )
     parser.add_argument("--output_csv", type=str, default="results.csv")
     parser.add_argument(
         "--sparsity_ratios",
@@ -203,10 +181,6 @@ def main():
 
     torch.set_default_dtype(torch.float32)
     torch.cuda.empty_cache()
-
-    # We will create a table with columns:
-    # [model_name, sparsity, <subtask1>, <subtask2>, ..., <subtask8>]
-    # We'll store them in memory and write at the end.
 
     table_header = ["model_name", "sparsity"] + [
         SHORT_NAMES[s] for s in TOMBENCH_SUBTASKS
@@ -237,7 +211,6 @@ def main():
             tokenizer,
             test_recs,
             eval_task,
-            try_times=args.try_times,
             device=args.device,
         )
         subtask_accs.append(acc)
@@ -245,12 +218,15 @@ def main():
     raw_name = f"RAW_{os.path.basename(args.model)}"
     results_rows.append([raw_name, "0%"] + [f"{x:.4f}" for x in subtask_accs])
 
+    print("\n=== Evaluating PRUNED models ===")
+
     for i, subtask_file in enumerate(TOMBENCH_SUBTASKS):
         for ratio in args.sparsity_ratios:
             # 1) Load fresh model
             print(f"\n=== Pruning on subtask '{subtask_file}' at {ratio}% sparsity ===")
-            base_model = get_llama(args).to(args.device)
-            base_model.eval()
+            base_model = AutoModelForCausalLM.from_pretrained(
+                args.model, torch_dtype=torch.float16
+            ).to(args.device)
 
             # 2) Prepare calibration set & test set for *this* subtask
             tokenizer = get_tokenizer(args.model)
@@ -265,24 +241,6 @@ def main():
                 seed=args.seed,
             )
 
-            # Build the ephemeral pruning args
-            pargs = argparse.Namespace()
-            pargs.sparsity = ratio / 100.0  # unstructured fraction
-            pargs.prunen = 0
-            pargs.prunem = 0
-            pargs.percdamp = 0.01
-            pargs.blocksize = 128
-            pargs.gmp = False
-            pargs.wbits = 16
-            pargs.minlayer = -1
-            pargs.maxlayer = 1000
-            pargs.prune_only = ""
-            pargs.invert = False
-            pargs.save = ""
-            pargs.true_sequential = False
-            pargs.log_wandb = False
-            pargs.nsamples = len(trainloader)
-
             max_cal_len = 0
             for inp, _, _ in trainloader:
                 seq_len = inp.shape[1]  # shape is [1, seq_len]
@@ -293,8 +251,10 @@ def main():
 
             # Actually prune
             llama_sparsellm(
-                base_model, tokenizer, trainloader, torch.device(args.device), pargs
+                base_model, trainloader, torch.device(args.device), ratio / 100.0
             )
+
+            base_model.eval()
 
             # Evaluate on all 8 subtasks
             subtask_accs = []
@@ -313,7 +273,6 @@ def main():
                     tokenizer,
                     test_recs,
                     eval_task,
-                    try_times=args.try_times,
                     device=args.device,
                 )
                 subtask_accs.append(acc)
