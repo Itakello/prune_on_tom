@@ -5,7 +5,7 @@ import random
 
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM
 
 from submodules.SparseLLM.datautils import get_tokenizer, get_tom
 
@@ -29,14 +29,14 @@ TOMBENCH_SUBTASKS = [
 
 # For CSV column naming
 SHORT_NAMES = {
-    "Ambiguous Story Task.jsonl": "Ambiguous",
-    "False Belief Task.jsonl": "FalseBelief",
-    "Hinting Task Test.jsonl": "Hinting",
-    "Faux-pas Recognition Test.jsonl": "FauxPas",
-    "Unexpected Outcome Test.jsonl": "UnexpOut",
-    "Persuasion Story Task.jsonl": "Persuasion",
-    "Strange Story Task.jsonl": "Strange",
-    "Scalar Implicature Task.jsonl": "ScalarImp",
+    "Ambiguous Story Task.jsonl": "AST",
+    "False Belief Task.jsonl": "FBT",
+    "Hinting Task Test.jsonl": "HTT",
+    "Faux-pas Recognition Test.jsonl": "FPR",
+    "Unexpected Outcome Test.jsonl": "UOT",
+    "Persuasion Story Task.jsonl": "PST",
+    "Strange Story Task.jsonl": "SST",
+    "Scalar Implicature Task.jsonl": "SIT",
 }
 
 ############################################################################
