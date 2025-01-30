@@ -4,3 +4,6 @@
 [submodule "submodules/SparseLLM"]
 	path = submodules/SparseLLM
 	url = https://github.com/BaiTheBest/SparseLLM.git
+[submodule "submodules/wanda"]
+	path = submodules/wanda
+	url = https://github.com/locuslab/wanda
