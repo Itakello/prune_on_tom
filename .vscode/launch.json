@@ -60,12 +60,18 @@
             "program": "main.py",
             "console": "integratedTerminal",
             "args": [
+                "--models",
+                "meta-llama/Llama-3.2-3b-Instruct",
+                "meta-llama/Llama-3.1-8b-Instruct",
                 "--seed",
                 "43",
                 "--train_num",
                 "64",
                 "--test_num",
-                "60"
+                "100",
+                "--sparsity_ratios",
+                "25",
+                "50"
             ],
             "justMyCode": false
         }
