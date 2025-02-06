@@ -74,6 +74,22 @@
                 "50"
             ],
             "justMyCode": false
+        },
+        {
+            "name": "Analyze pruning",
+            "type": "python",
+            "request": "launch",
+            "program": "analyze_pruning.py",
+            "console": "integratedTerminal",
+            "args": [],
+        },
+        {
+            "name": "Plot results",
+            "type": "python",
+            "request": "launch",
+            "program": "plot_results.py",
+            "console": "integratedTerminal",
+            "args": [],
         }
     ]
 }
