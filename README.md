@@ -26,6 +26,33 @@ conda activate prune_on_tom
 pip install -r requirements.txt
 ```
 
+## Usage 🚀
+
+The main script (`main.py`) supports various parameters for model evaluation and pruning:
+
+```bash
+python main.py [--models MODEL_NAMES] [--train_num N] [--test_num N] [--sparsity_ratios RATIOS] [--seed SEED]
+```
+
+Parameters:
+- `--models`: List of model names/paths (default: meta-llama/Llama-3.2-3b-Instruct)
+- `--train_num`: Calibration set size per subtask (default: 32)
+- `--test_num`: Test set size per subtask (default: 5, use negative for all)
+- `--sparsity_ratios`: List of pruning percentages (default: 25 50 75)
+- `--seed`: Random seed (default: 42)
+
+Example usage:
+```bash
+# Run with default parameters
+python main.py
+
+# Run with custom models and sparsity ratios
+python main.py --models meta-llama/Llama-2-7b-chat tiiuae/falcon-7b --sparsity_ratios 30 60 90
+
+# Use larger calibration and test sets
+python main.py --train_num 64 --test_num 20
+```
+
 ## Data 📊
 All evaluation data is sourced from the ToMBench repository and can be found in the `data/` folder.
 This includes various Theory of Mind tasks like:
