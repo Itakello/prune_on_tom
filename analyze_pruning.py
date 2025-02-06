@@ -32,10 +32,10 @@ def analyze_models():
         # Option 1: Use the eos_token as the pad token.
         tokenizer.pad_token = tokenizer.eos_token
 
-    # get_layerwise_weight_distribution(model_paths)
-    # get_activation_statistics(model_paths)
-    # get_sensitivity_analysis(model_paths)
-    # run_eval_zero_shot_all(model_paths, tokenizer)
+    get_layerwise_weight_distribution(model_paths)
+    get_activation_statistics(model_paths)
+    get_sensitivity_analysis(model_paths)
+    run_eval_zero_shot_all(model_paths, tokenizer)
     get_attention_heads_statistics(model_paths)
 
 

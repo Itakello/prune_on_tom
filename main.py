@@ -309,15 +309,6 @@ def main() -> None:
     print("Rows:", len(results_rows))
     print("Columns:", len(header))
 
-    """from submodules.SparseLLM.analysis_utils import (
-        get_global_sparsity,
-        get_per_layer_sparsity,
-        get_attention_mlp_breakdown,
-        get_heads_vs_intermediate_sparsity,
-        get_mask_overlap,
-        get_layer_by_layer_mask_overlap,
-    )"""
-
 
 if __name__ == "__main__":
     main()
